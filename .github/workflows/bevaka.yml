@@ -2,9 +2,9 @@ name: Bevaka jaktplatser
 
 on:
   schedule:
-    # Varannan timme 07–23 svensk sommartid (06–22 vintertid).
+    # Varje timme 07–23 svensk sommartid (06–22 vintertid).
     # Cron i GitHub Actions går alltid i UTC, därför 05–21 UTC.
-    - cron: '0 5-21/2 * * *'
+    - cron: '0 5-21 * * *'
   workflow_dispatch:        # gör att du kan trycka "Run workflow" manuellt
 
 permissions:
