@@ -1,0 +1,79 @@
+name: Bevaka jaktplatser
+
+on:
+  schedule:
+    # Varannan timme 07–23 svensk sommartid (06–22 vintertid).
+    # Cron i GitHub Actions går alltid i UTC, därför 05–21 UTC.
+    - cron: '0 5-21/2 * * *'
+  workflow_dispatch:        # gör att du kan trycka "Run workflow" manuellt
+
+permissions:
+  contents: write           # för att spara state.json
+  issues: write             # för att skapa larm-issue
+
+concurrency:
+  group: bevaka
+  cancel-in-progress: false
+
+jobs:
+  kolla:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cachea Playwright-webbläsaren
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-1.48.0
+
+      - name: Installera beroenden
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Kolla bokningsläget
+        id: kolla
+        run: node kolla.mjs
+
+      - name: Skapa larm-issue
+        if: steps.kolla.outputs.larm == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "🎯 ${{ steps.kolla.outputs.rubrik }}" --body-file larm-text.md
+
+      # Valfritt mejl i stället för/utöver GitHub-issue.
+      # Kräver två repository secrets: GMAIL_ADRESS och GMAIL_APPLOSENORD
+      # (app-lösenord skapas på myaccount.google.com/apppasswords).
+      # Ta bort # nedan för att aktivera.
+      #
+      # - name: Mejla larm
+      #   if: steps.kolla.outputs.larm == 'true'
+      #   uses: dawidd6/action-send-mail@v3
+      #   with:
+      #     server_address: smtp.gmail.com
+      #     server_port: 465
+      #     secure: true
+      #     username: ${{ secrets.GMAIL_ADRESS }}
+      #     password: ${{ secrets.GMAIL_APPLOSENORD }}
+      #     from: Jaktbevakning
+      #     to: ${{ secrets.GMAIL_ADRESS }}
+      #     subject: "🎯 ${{ steps.kolla.outputs.rubrik }}"
+      #     html_body: file://larm-text.md
+
+      - name: Spara state
+        if: always()
+        run: |
+          if [[ -n "$(git status --porcelain state.json)" ]]; then
+            git config user.name  "jaktbevakning"
+            git config user.email "actions@github.com"
+            git add state.json
+            git commit -m "state: $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          else
+            echo "Ingen förändring i state.json."
+          fi
