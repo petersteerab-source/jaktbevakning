@@ -33,33 +33,51 @@ async function hämtaRader() {
   }
 
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage({ locale: 'sv-SE' });
-    await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 
-    // Bokningssystemet laddas asynkront. Vänta tills tabellen faktiskt har innehåll.
-    await page.waitForFunction(
-      sel => document.querySelectorAll(sel).length > 5,
-      RAD,
-      { timeout: 60_000 }
-    );
+  // jaktgård.se har enstaka sega minuter. Ett misslyckat försök ska inte
+  // fälla hela körningen — försök om innan vi ger upp.
+  const FORSOK = 3;
+  const PAUS_MS = 10_000;
+  let sistaFel;
 
-    return await page.$$eval(
-      RAD,
-      (els, cell) =>
-        els
-          .map(el =>
-            [...el.querySelectorAll(cell)]
-              .map(c => c.innerText.trim().replace(/\s+/g, ' '))
-              .filter(Boolean)
-          )
-          .filter(r => r.length > 3),
-      CELL
-    );
-  } finally {
-    await browser.close();
+  for (let n = 1; n <= FORSOK; n++) {
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage({ locale: 'sv-SE' });
+      await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+
+      // Bokningssystemet laddas asynkront. Vänta tills tabellen faktiskt har innehåll.
+      await page.waitForFunction(
+        sel => document.querySelectorAll(sel).length > 5,
+        RAD,
+        { timeout: 60_000 }
+      );
+
+      const rader = await page.$$eval(
+        RAD,
+        (els, cell) =>
+          els
+            .map(el =>
+              [...el.querySelectorAll(cell)]
+                .map(c => c.innerText.trim().replace(/\s+/g, ' '))
+                .filter(Boolean)
+            )
+            .filter(r => r.length > 3),
+        CELL
+      );
+
+      if (n > 1) console.log(`Sidan lästes på försök ${n} av ${FORSOK}.`);
+      return rader;
+    } catch (fel) {
+      sistaFel = fel;
+      console.log(`Försök ${n}/${FORSOK} misslyckades: ${String(fel.message).split('\n')[0]}`);
+      if (n < FORSOK) await new Promise(r => setTimeout(r, PAUS_MS));
+    } finally {
+      await browser.close();
+    }
   }
+
+  throw sistaFel;
 }
 
 const rader = await hämtaRader();
@@ -122,7 +140,7 @@ for (const b of bevakningar) {
     `${ledig ? '✅' : '⛔'} ${nyckel} — ${rad.platser || rad.knapp} (tidigare: ${föregående ?? 'okänt'})`
   );
 
-  // Larma bara vid övergången → ledig, annars mejlas du varannan timme så länge platsen står kvar.
+  // Larma bara vid övergången → ledig, annars mejlas du varje timme så länge platsen står kvar.
   if (ledig && föregående !== 'ledig') {
     larm.push({
       rubrik: `${rad.kurs} — ${b.datum}`,
