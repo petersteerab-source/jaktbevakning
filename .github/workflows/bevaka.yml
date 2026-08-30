@@ -1,11 +1,14 @@
 name: Bevaka jaktplatser
 
+# GitHub hoppar över de flesta täta schemalagda starterna (best effort, ingen garanti).
+# Därför få starter som var och en LOOPAR internt i 4,5 timme och kollar var 10:e minut.
+# Fyra starter täcker 07–23 svensk tid även om någon av dem uteblir.
+
 on:
   schedule:
-    # Varje timme 07–23 svensk sommartid (06–22 vintertid).
-    # Cron i GitHub Actions går alltid i UTC, därför 05–21 UTC.
-    - cron: '0 5-21 * * *'
-  workflow_dispatch:        # gör att du kan trycka "Run workflow" manuellt
+    # 05, 09, 13, 17 UTC = 07, 11, 15, 19 svensk sommartid (06, 10, 14, 18 vintertid).
+    - cron: '0 5,9,13,17 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write           # för att spara state.json
@@ -18,6 +21,7 @@ concurrency:
 jobs:
   kolla:
     runs-on: ubuntu-latest
+    timeout-minutes: 300     # säkerhetsspärr; loopen slutar av sig själv efter 270 min
     steps:
       - uses: actions/checkout@v4
 
@@ -36,34 +40,13 @@ jobs:
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Kolla bokningsläget
-        id: kolla
-        run: node kolla.mjs
-
-      - name: Skapa larm-issue
-        if: steps.kolla.outputs.larm == 'true'
+      - name: Bevaka i 4,5 timme
         env:
+          LOOP_MINUTER: '270'    # 4,5 timme
+          INTERVALL_MIN: '10'    # kontroll var tionde minut
+          SLUT_TIMME: '23'       # sluta när klockan passerat 23 svensk tid
           GH_TOKEN: ${{ github.token }}
-        run: gh issue create --title "🎯 ${{ steps.kolla.outputs.rubrik }}" --body-file larm-text.md
-
-      # Valfritt mejl i stället för/utöver GitHub-issue.
-      # Kräver två repository secrets: GMAIL_ADRESS och GMAIL_APPLOSENORD
-      # (app-lösenord skapas på myaccount.google.com/apppasswords).
-      # Ta bort # nedan för att aktivera.
-      #
-      # - name: Mejla larm
-      #   if: steps.kolla.outputs.larm == 'true'
-      #   uses: dawidd6/action-send-mail@v3
-      #   with:
-      #     server_address: smtp.gmail.com
-      #     server_port: 465
-      #     secure: true
-      #     username: ${{ secrets.GMAIL_ADRESS }}
-      #     password: ${{ secrets.GMAIL_APPLOSENORD }}
-      #     from: Jaktbevakning
-      #     to: ${{ secrets.GMAIL_ADRESS }}
-      #     subject: "🎯 ${{ steps.kolla.outputs.rubrik }}"
-      #     html_body: file://larm-text.md
+        run: node kolla.mjs
 
       - name: Spara state
         if: always()
@@ -73,6 +56,7 @@ jobs:
             git config user.email "actions@github.com"
             git add state.json
             git commit -m "state: $(date -u +%Y-%m-%dT%H:%MZ)"
+            git pull --rebase --autostash
             git push
           else
             echo "Ingen förändring i state.json."
