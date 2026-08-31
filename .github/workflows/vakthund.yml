@@ -1,0 +1,88 @@
+name: Vakthund
+
+# Dödmansgrepp. Larmar om jaktbevakningen har tystnat.
+#
+# Bevakningen larmar bara när något HÄNDER. Slutar den köra hör du ingenting alls,
+# och tystnad ser likadan ut som "inga lediga platser". Den här vakthunden vänder
+# på det: den larmar när det INTE har hänt något på för länge.
+#
+# Begränsning värd att känna till: vakthunden körs av samma schemaläggare som den
+# bevakar. Slutar GitHub starta jobb helt tystnar även den. Den fångar det vanliga
+# fallet — bevakningen stryps eller går sönder — men inte att hela Actions ligger nere.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'      # 08 svensk sommartid, 07 vintertid
+  workflow_dispatch:
+
+permissions:
+  actions: read              # för att läsa bevakningens körhistorik
+  issues: write              # för att larma
+  contents: read
+
+jobs:
+  kontrollera:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kolla när bevakningen senast kördes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GRANS_TIMMAR: '26'   # larma om det gått längre än så sedan senaste körning
+        run: |
+          set -euo pipefail
+
+          senaste=$(gh run list --workflow bevaka.yml --limit 1 \
+                      --json updatedAt --jq '.[0].updatedAt // empty')
+
+          if [[ -z "$senaste" ]]; then
+            echo "Hittade inga körningar alls av bevaka.yml."
+            timmar=999
+            senaste="aldrig"
+          else
+            nu=$(date -u +%s)
+            sen=$(date -u -d "$senaste" +%s)
+            timmar=$(( (nu - sen) / 3600 ))
+            echo "Senaste körning: $senaste ($timmar timmar sedan)."
+          fi
+
+          if (( timmar < GRANS_TIMMAR )); then
+            echo "✅ Bevakningen lever. Inget larm."
+            exit 0
+          fi
+
+          echo "⚠️ Ingen körning på $timmar timmar — gränsen är $GRANS_TIMMAR."
+
+          # Larma inte om vi redan har ett öppet vakthundslarm liggande.
+          oppna=$(gh issue list --state open --limit 50 \
+                    --json title --jq '[.[] | select(.title | startswith("⚠️ Jaktbevakningen"))] | length')
+
+          if (( oppna > 0 )); then
+            echo "Ett vakthundslarm ligger redan öppet. Skapar inget nytt."
+            exit 0
+          fi
+
+          {
+            echo "Jaktbevakningen har inte kört på **$timmar timmar**."
+            echo ""
+            echo "Senaste körning: $senaste"
+            echo ""
+            echo "Det betyder att inga jaktplatser kontrolleras just nu. Tystnad från"
+            echo "bevakningen betyder alltså INTE att allt är fullbokat — den kollar inte alls."
+            echo ""
+            echo "Vanligaste orsakerna:"
+            echo ""
+            echo "1. GitHub har pausat schemalagda workflows (sker efter 60 dagars inaktivitet i repot)."
+            echo "   Åtgärd: gå till fliken Actions och tryck \"Enable workflow\"."
+            echo "2. GitHub har strypt schemaläggningen hårdare än vanligt."
+            echo "   Åtgärd: tryck \"Run workflow\" manuellt under Actions för att komma igång igen."
+            echo "3. Något i koden har gått sönder."
+            echo "   Åtgärd: titta på senaste körningen under Actions."
+            echo ""
+            echo "Stäng den här issuen när bevakningen går igen — annars larmar vakthunden inte på nytt."
+          } > vakthund.md
+
+          gh issue create \
+            --title "⚠️ Jaktbevakningen har tystnat ($timmar timmar)" \
+            --body-file vakthund.md
