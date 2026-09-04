@@ -1,8 +1,8 @@
 name: Bevaka jaktplatser
 
-# GitHub hoppar över de flesta täta schemalagda starterna (best effort, ingen garanti).
-# Därför få starter som var och en LOOPAR internt i 4,5 timme och kollar var 10:e minut.
-# Fyra starter täcker 07–23 svensk tid även om någon av dem uteblir.
+# GitHub hoppar över täta cron-starter (best effort). Få långa jobb som loopar
+# internt ger fler faktiska kontroller. Utan Playwright tar varje varv sekunder,
+# så intervallet kan vara tätt utan att äta minuter.
 
 on:
   schedule:
@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write           # för att spara state.json
-  issues: write             # för att skapa larm-issue
+  contents: write
+  issues: write
 
 concurrency:
   group: bevaka
@@ -21,7 +21,7 @@ concurrency:
 jobs:
   kolla:
     runs-on: ubuntu-latest
-    timeout-minutes: 300     # säkerhetsspärr; loopen slutar av sig själv efter 270 min
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
@@ -29,23 +29,14 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Cachea Playwright-webbläsaren
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-1.48.0
-
-      - name: Installera beroenden
-        run: |
-          npm install --no-audit --no-fund
-          npx playwright install --with-deps chromium
-
       - name: Bevaka i 4,5 timme
         env:
-          LOOP_MINUTER: '270'    # 4,5 timme
-          INTERVALL_MIN: '10'    # kontroll var tionde minut
-          SLUT_TIMME: '23'       # sluta när klockan passerat 23 svensk tid
+          LOOP_MINUTER: '270'
+          INTERVALL_MIN: '10'
+          SLUT_TIMME: '23'
           GH_TOKEN: ${{ github.token }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
         run: node kolla.mjs
 
       - name: Spara state
