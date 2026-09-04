@@ -1,7 +1,13 @@
 // Bevakar återbudsplatser hos Stockholms Jaktgårdar (jaktgård.se).
 //
-// Data hämtas direkt från EduAdmins JSON-endpoint — ingen webbläsare.
-// Playwright finns kvar som reserv om API-svaret slutar se ut som förväntat.
+// Data hämtas direkt från EduAdmins JSON-endpoint — snabbt och utan webbläsare.
+// Endpointen är odokumenterad och portalnyckeln kan roteras, därför finns
+// Playwright kvar som RIKTIG reserv: efter tre misslyckade API-försök läses
+// sidan i stället i Chromium. Sätt PLAYWRIGHT_RESERV=0 för att stänga av.
+//
+// Misslyckas även reserven tre varv i rad skapas en larm-issue. Utan den
+// kan loopen misslyckas timme efter timme utan att någon märker det —
+// vakthunden ser bara att jobbet KÖRDE, inte att det inte läste något.
 //
 // Två lägen:
 //   LOOP_MINUTER=0 (standard) → en enda kontroll, avslutar.
@@ -193,9 +199,12 @@ async function hämtaRader() {
     }
   }
 
-  if (process.env.TILLÅT_PLAYWRIGHT === '1') {
-    console.log('   Faller tillbaka på Playwright…');
-    return hämtaViaPlaywright();
+  // Reserven är PÅ som standard. Den kostar bara tid när API:t faktiskt är trasigt.
+  if (process.env.PLAYWRIGHT_RESERV !== '0') {
+    console.log('   API:t svarar inte — faller tillbaka på Playwright…');
+    const rader = await hämtaViaPlaywright();
+    console.log(`   Playwright läste ${rader.length} rader.`);
+    return rader;
   }
   throw sistaFel;
 }
@@ -221,14 +230,15 @@ async function enKontroll(bevakningar, tidigare) {
 
   const idag = svensktDatum();
   const larm = [];
-  const nyJakter = { ...tidigare.jakter };
+  // Byggs från grunden varje varv. Ärvs den föregående med spread ligger
+  // borttagna bevakningar kvar i state för alltid.
+  const nyJakter = {};
 
   for (const b of bevakningar) {
     const nyckel = `${b.datum}|${b.namn}|${b.ort}`;
 
     if (b.datum < idag) {
       console.log(`⏭  ${nyckel} — datumet har passerat, hoppar över.`);
-      delete nyJakter[nyckel];
       continue;
     }
 
@@ -328,13 +338,62 @@ async function skickaLarm(larm) {
   await skickaNtfy(rubrik, brödtext.replace(/\*\*/g, ''));
 }
 
+// Larmar när själva avläsningen är trasig — inte när en jakt öppnar.
+// Vakthunden ser bara att jobbet kördes, inte att varje varv misslyckades.
+function larmaLäsfel(missar, fel) {
+  const rubrik = `⚠️ Bevakningen kan inte läsa jaktgård.se (${missar} varv i rad)`;
+  console.error(`\n${rubrik}`);
+
+  if (!process.env.GH_TOKEN) return;
+  try {
+    const öppna = execFileSync(
+      'gh',
+      ['issue', 'list', '--state', 'open', '--limit', '50', '--json', 'title',
+       '--jq', '[.[] | select(.title | startswith("⚠️ Bevakningen kan inte läsa"))] | length'],
+      { encoding: 'utf8' }
+    ).trim();
+    if (Number(öppna) > 0) {
+      console.error('   Ett läsfelslarm ligger redan öppet. Skapar inget nytt.');
+      return;
+    }
+
+    const text = [
+      `Bevakningen har misslyckats med att läsa sidan **${missar} varv i rad**.`,
+      '',
+      `Senaste felet: \`${String(fel.message).split('\n')[0]}\``,
+      '',
+      'Inga jaktplatser kontrolleras just nu. Tystnad från bevakningen betyder',
+      'alltså INTE att allt är fullbokat.',
+      '',
+      'Troliga orsaker:',
+      '',
+      '1. EduAdmin har ändrat sin endpoint eller roterat portalnyckeln',
+      '   (\`EDUADMIN_PORTAL\`, just nu hårdkodad i kolla.mjs).',
+      '2. Både API och Playwright-reserven fallerar — sajten kan ligga nere.',
+      '3. Sidans HTML-struktur har ändrats så att även reserven misslyckas.',
+      '',
+      'Stäng issuen när det fungerar igen — annars larmas du inte på nytt.'
+    ].join('\n');
+
+    writeFileSync('lasfel.md', text);
+    execFileSync('gh', ['issue', 'create', '--title', rubrik, '--body-file', 'lasfel.md'],
+      { stdio: 'inherit' });
+    console.error('   Läsfelslarm skapat.');
+  } catch (e) {
+    console.error(`   Kunde inte skapa läsfelslarm: ${e.message}`);
+  }
+}
+
 rensaLarmfiler();
 
 const bevakningar = JSON.parse(readFileSync('bevakningar.json', 'utf8'));
 let tidigare = läsState();
 
 const slutTid = Date.now() + LOOP_MINUTER * 60_000;
+const MISSAR_INNAN_LARM = Number(process.env.MISSAR_INNAN_LARM || 3);
 let varv = 0;
+let missar = 0;
+let läsfelLarmat = false;
 
 while (true) {
   varv++;
@@ -348,9 +407,18 @@ while (true) {
     if (ändrad) committaState('ändring');
     if (larm.length) await skickaLarm(larm);
     else console.log('Inga nya lediga platser.');
+
+    if (missar > 0) console.log(`   (avläsningen fungerar igen efter ${missar} misslyckade varv)`);
+    missar = 0;
+    läsfelLarmat = false;
   } catch (fel) {
-    console.error(`Kontrollen misslyckades: ${fel.message}`);
+    missar++;
+    console.error(`Kontrollen misslyckades (${missar} i rad): ${fel.message}`);
     if (LOOP_MINUTER <= 0) process.exit(1);
+    if (missar >= MISSAR_INNAN_LARM && !läsfelLarmat) {
+      läsfelLarmat = true;
+      larmaLäsfel(missar, fel);
+    }
   }
 
   if (LOOP_MINUTER <= 0) break;
