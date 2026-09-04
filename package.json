@@ -1,14 +1,11 @@
 {
   "name": "jaktbevakning",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Bevakar återbudsplatser hos Stockholms Jaktgårdar",
   "scripts": {
     "kolla": "node kolla.mjs",
     "test": "FIXTURE=fixture-nu.json node kolla.mjs"
-  },
-  "dependencies": {
-    "playwright": "1.48.0"
   }
 }

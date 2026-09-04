@@ -1,5 +1,5 @@
 [
-  { "namn": "Sjöfågeljakt",                                "ort": "Gålö", "datum": "2026-10-04" },
-  { "namn": "Kombijakt på vildsvin, rådjur och dovhjort",  "ort": "Gålö", "datum": "2026-10-16" },
-  { "namn": "Sjöfågeljakt",                                "ort": "Gålö", "datum": "2026-10-18" }
+  { "namn": "Sjöfågeljakt",                               "ort": "Gålö", "datum": "2026-10-04", "id": 2295483 },
+  { "namn": "Kombijakt på vildsvin, rådjur och dovhjort", "ort": "Gålö", "datum": "2026-10-16", "id": 2301412 },
+  { "namn": "Sjöfågeljakt",                               "ort": "Gålö", "datum": "2026-10-18", "id": 2295484 }
 ]
