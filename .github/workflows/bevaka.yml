@@ -1,8 +1,12 @@
 name: Bevaka jaktplatser
 
 # GitHub hoppar över täta cron-starter (best effort). Få långa jobb som loopar
-# internt ger fler faktiska kontroller. Utan Playwright tar varje varv sekunder,
-# så intervallet kan vara tätt utan att äta minuter.
+# internt ger fler faktiska kontroller. Varje varv går mot EduAdmins JSON-API
+# och tar sekunder.
+#
+# Playwright installeras ändå — inte för normaldrift, utan som reserv när API:t
+# fallerar. Installationen sker en gång per körning (~20 s) och delas av alla
+# 27 varv, så kostnaden är försumbar mot att stå blind om endpointen ändras.
 
 on:
   schedule:
@@ -29,11 +33,23 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Cachea Playwright-webbläsaren
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-1.48.0
+
+      - name: Installera reservberoenden
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
       - name: Bevaka i 4,5 timme
         env:
           LOOP_MINUTER: '270'
           INTERVALL_MIN: '10'
           SLUT_TIMME: '23'
+          MISSAR_INNAN_LARM: '3'
           GH_TOKEN: ${{ github.token }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
