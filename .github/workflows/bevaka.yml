@@ -57,14 +57,28 @@ jobs:
 
       - name: Spara state
         if: always()
+        # Körningens state.json ska alltid vinna. Pull-rebase med lokal commit gav
+        # merge-konflikt så fort main ändrats under passet (t.ex. egna commits).
+        # Därför: lägg undan filen, hämta färsk main, lägg tillbaka, committa, pusha.
         run: |
           if [[ -n "$(git status --porcelain state.json)" ]]; then
             git config user.name  "jaktbevakning"
             git config user.email "actions@github.com"
+            cp state.json /tmp/state.json
+            git checkout -- state.json
+            git pull --rebase
+            cp /tmp/state.json state.json
+            if git diff --quiet state.json; then
+              echo "state.json redan uppdaterad på main."
+              exit 0
+            fi
             git add state.json
             git commit -m "state: $(date -u +%Y-%m-%dT%H:%MZ)"
-            git pull --rebase --autostash
-            git push
+            for i in 1 2 3; do
+              git push && break
+              echo "Push misslyckades (försök $i), hämtar igen."
+              git pull --rebase -X theirs
+            done
           else
             echo "Ingen förändring i state.json."
           fi
