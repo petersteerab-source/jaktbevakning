@@ -1,12 +1,8 @@
 name: Bevaka jaktplatser
 
-# GitHub hoppar över täta cron-starter (best effort). Få långa jobb som loopar
-# internt ger fler faktiska kontroller. Varje varv går mot EduAdmins JSON-API
-# och tar sekunder.
-#
-# Playwright installeras ändå — inte för normaldrift, utan som reserv när API:t
-# fallerar. Installationen sker en gång per körning (~20 s) och delas av alla
-# 27 varv, så kostnaden är försumbar mot att stå blind om endpointen ändras.
+# GitHub hoppar över de flesta täta schemalagda starterna (best effort, ingen garanti).
+# Därför få starter som var och en LOOPAR internt i 4,5 timme och kollar var 10:e minut.
+# Fyra starter täcker 07–23 svensk tid även om någon av dem uteblir.
 
 on:
   schedule:
@@ -15,8 +11,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
+  contents: write           # för att spara state.json
+  issues: write             # för att skapa larm-issue
 
 concurrency:
   group: bevaka
@@ -25,7 +21,7 @@ concurrency:
 jobs:
   kolla:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 300     # säkerhetsspärr; loopen slutar av sig själv efter 270 min
     steps:
       - uses: actions/checkout@v4
 
@@ -39,46 +35,29 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-1.48.0
 
-      - name: Installera reservberoenden
+      - name: Installera beroenden
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
       - name: Bevaka i 4,5 timme
         env:
-          LOOP_MINUTER: '270'
-          INTERVALL_MIN: '10'
-          SLUT_TIMME: '23'
-          MISSAR_INNAN_LARM: '3'
+          LOOP_MINUTER: '270'    # 4,5 timme
+          INTERVALL_MIN: '10'    # kontroll var tionde minut
+          SLUT_TIMME: '23'       # sluta när klockan passerat 23 svensk tid
           GH_TOKEN: ${{ github.token }}
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
         run: node kolla.mjs
 
       - name: Spara state
         if: always()
-        # Körningens state.json ska alltid vinna. Pull-rebase med lokal commit gav
-        # merge-konflikt så fort main ändrats under passet (t.ex. egna commits).
-        # Därför: lägg undan filen, hämta färsk main, lägg tillbaka, committa, pusha.
         run: |
           if [[ -n "$(git status --porcelain state.json)" ]]; then
             git config user.name  "jaktbevakning"
             git config user.email "actions@github.com"
-            cp state.json /tmp/state.json
-            git checkout -- state.json
-            git pull --rebase
-            cp /tmp/state.json state.json
-            if git diff --quiet state.json; then
-              echo "state.json redan uppdaterad på main."
-              exit 0
-            fi
             git add state.json
             git commit -m "state: $(date -u +%Y-%m-%dT%H:%MZ)"
-            for i in 1 2 3; do
-              git push && break
-              echo "Push misslyckades (försök $i), hämtar igen."
-              git pull --rebase -X theirs
-            done
+            git pull --rebase --autostash
+            git push
           else
             echo "Ingen förändring i state.json."
           fi
