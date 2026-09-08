@@ -1,6 +1,10 @@
 // Bevakar återbudsplatser hos Stockholms Jaktgårdar (jaktgård.se).
 // Sidan renderas med JavaScript (EduAdmin-widget), därför Playwright och inte enkel HTTP-hämtning.
 //
+// Misslyckas avläsningen MISSAR_INNAN_LARM varv i rad skapas en larm-issue.
+// Utan den kan loopen misslyckas timme efter timme utan att någon märker det —
+// vakthunden ser bara att jobbet KÖRDE, inte att det inte läste något.
+//
 // Två lägen:
 //   LOOP_MINUTER=0 (standard) → en enda kontroll, avslutar.
 //   LOOP_MINUTER=270          → kontrollerar var INTERVALL_MIN minut i 4,5 timme.
@@ -184,6 +188,54 @@ function skickaLarm(larm) {
   }
 }
 
+// ---------- Larm när avläsningen är trasig ----------
+
+// Detta larm gäller INTE att en jakt öppnat, utan att bevakningen inte kan läsa
+// sidan alls. Vakthunden fångar inte det: den ser att jobbet kördes.
+function larmaLäsfel(missar, fel) {
+  const rubrik = `⚠️ Bevakningen kan inte läsa jaktgård.se (${missar} varv i rad)`;
+  console.error(`\n${rubrik}`);
+
+  if (!process.env.GH_TOKEN) return;
+  try {
+    const öppna = execFileSync(
+      'gh',
+      ['issue', 'list', '--state', 'open', '--limit', '50', '--json', 'title',
+       '--jq', '[.[] | select(.title | startswith("⚠️ Bevakningen kan inte läsa"))] | length'],
+      { encoding: 'utf8' }
+    ).trim();
+    if (Number(öppna) > 0) {
+      console.error('   Ett läsfelslarm ligger redan öppet. Skapar inget nytt.');
+      return;
+    }
+
+    const text = [
+      `Bevakningen har misslyckats med att läsa sidan **${missar} varv i rad**.`,
+      '',
+      `Senaste felet: \`${String(fel.message).split('\n')[0]}\``,
+      '',
+      'Inga jaktplatser kontrolleras just nu. Tystnad från bevakningen betyder',
+      'alltså INTE att allt är fullbokat.',
+      '',
+      'Troliga orsaker:',
+      '',
+      '1. jaktgård.se ligger nere eller svarar för långsamt.',
+      '2. Sidans HTML-struktur har ändrats så att avläsningen inte hittar raderna.',
+      '3. Playwright kunde inte starta i körmiljön.',
+      '',
+      'Titta på senaste körningen under Actions för det faktiska felet.',
+      'Stäng issuen när det fungerar igen — annars larmas du inte på nytt.'
+    ].join('\n');
+
+    writeFileSync('lasfel.md', text);
+    execFileSync('gh', ['issue', 'create', '--title', rubrik, '--body-file', 'lasfel.md'],
+      { stdio: 'inherit' });
+    console.error('   Läsfelslarm skapat.');
+  } catch (e) {
+    console.error(`   Kunde inte skapa läsfelslarm: ${e.message}`);
+  }
+}
+
 // ---------- Huvudloop ----------
 
 for (const f of ['larm-rubrik.txt', 'larm-text.md']) {
@@ -198,7 +250,10 @@ const bevakningar = JSON.parse(readFileSync('bevakningar.json', 'utf8'));
 let tidigare = existsSync(STATE_FIL) ? JSON.parse(readFileSync(STATE_FIL, 'utf8')) : {};
 
 const slutTid = Date.now() + LOOP_MINUTER * 60_000;
+const MISSAR_INNAN_LARM = Number(process.env.MISSAR_INNAN_LARM || 3);
 let varv = 0;
+let missar = 0;
+let läsfelLarmat = false;
 
 while (true) {
   varv++;
@@ -210,11 +265,20 @@ while (true) {
     writeFileSync(STATE_FIL, JSON.stringify(nyState, null, 2) + '\n');
     if (larm.length) skickaLarm(larm);
     else console.log('Inga nya lediga platser.');
+
+    if (missar > 0) console.log(`   (avläsningen fungerar igen efter ${missar} misslyckade varv)`);
+    missar = 0;
+    läsfelLarmat = false;
   } catch (fel) {
     // I loopläget ska ett trasigt varv inte fälla körningen — nästa varv
     // kommer om tio minuter. Vid enkelkörning är felet däremot värt ett larm.
-    console.error(`Kontrollen misslyckades: ${fel.message}`);
+    missar++;
+    console.error(`Kontrollen misslyckades (${missar} i rad): ${fel.message}`);
     if (LOOP_MINUTER <= 0) process.exit(1);
+    if (missar >= MISSAR_INNAN_LARM && !läsfelLarmat) {
+      läsfelLarmat = true;
+      larmaLäsfel(missar, fel);
+    }
   }
 
   if (LOOP_MINUTER <= 0) break;
