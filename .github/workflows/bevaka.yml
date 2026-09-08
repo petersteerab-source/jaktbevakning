@@ -45,6 +45,7 @@ jobs:
           LOOP_MINUTER: '270'    # 4,5 timme
           INTERVALL_MIN: '10'    # kontroll var tionde minut
           SLUT_TIMME: '23'       # sluta när klockan passerat 23 svensk tid
+          MISSAR_INNAN_LARM: '3' # larma när avläsningen fallerat 3 varv i rad
           GH_TOKEN: ${{ github.token }}
         run: node kolla.mjs
 
