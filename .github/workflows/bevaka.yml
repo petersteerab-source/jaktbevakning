@@ -42,7 +42,7 @@ jobs:
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Bevaka i 4,5 timme
+      - name: Bevaka i 5,5 timme
         env:
           LOOP_MINUTER: '330'    # 5,5 timme
           INTERVALL_MIN: '10'    # kontroll var tionde minut
