@@ -7,7 +7,9 @@ name: Bevaka jaktplatser
 on:
   schedule:
     # 05, 09, 13, 17 UTC = 07, 11, 15, 19 svensk sommartid (06, 10, 14, 18 vintertid).
-    - cron: '0 5,9,13,17 * * *'
+    # Udda minut med flit: GitHub köar flest jobb vid minut 0 och kastar
+    # överskottet. Minut 17 går oftare igenom.
+    - cron: '17 5,9,13,17 * * *'
   workflow_dispatch:
 
 permissions:
@@ -21,7 +23,7 @@ concurrency:
 jobs:
   kolla:
     runs-on: ubuntu-latest
-    timeout-minutes: 300     # säkerhetsspärr; loopen slutar av sig själv efter 270 min
+    timeout-minutes: 360     # säkerhetsspärr; loopen slutar av sig själv efter 330 min
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +44,7 @@ jobs:
 
       - name: Bevaka i 4,5 timme
         env:
-          LOOP_MINUTER: '270'    # 4,5 timme
+          LOOP_MINUTER: '330'    # 5,5 timme
           INTERVALL_MIN: '10'    # kontroll var tionde minut
           SLUT_TIMME: '23'       # sluta när klockan passerat 23 svensk tid
           MISSAR_INNAN_LARM: '3' # larma när avläsningen fallerat 3 varv i rad
