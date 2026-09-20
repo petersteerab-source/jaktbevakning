@@ -1,15 +1,17 @@
 name: Bevaka jaktplatser
 
 # GitHub hoppar över de flesta täta schemalagda starterna (best effort, ingen garanti).
-# Därför få starter som var och en LOOPAR internt i 4,5 timme och kollar var 10:e minut.
-# Fyra starter täcker 07–23 svensk tid även om någon av dem uteblir.
+# Därför få starter som var och en LOOPAR internt i 5,5 timme och kollar var 10:e minut.
+# Extra tidiga starter är överbokning med flit: de flesta uteblir, och de som
+# krockar med ett pågående pass köar i stället för att köra parallellt.
 
 on:
   schedule:
-    # 05, 09, 13, 17 UTC = 07, 11, 15, 19 svensk sommartid (06, 10, 14, 18 vintertid).
-    # Udda minut med flit: GitHub köar flest jobb vid minut 0 och kastar
-    # överskottet. Minut 17 går oftare igenom.
-    - cron: '17 5,9,13,17 * * *'
+    # UTC. Svensk sommartid = +2, vintertid = +1.
+    # 04–07 UTC är fyra försök att få igång ETT morgonpass — 05:17 har i praktiken
+    # aldrig gått igång på egen hand. Resten täcker dagen.
+    # Udda minut med flit: GitHub köar flest jobb vid minut 0 och kastar överskottet.
+    - cron: '17 4,5,6,7,9,13,17 * * *'
   workflow_dispatch:
 
 permissions:
